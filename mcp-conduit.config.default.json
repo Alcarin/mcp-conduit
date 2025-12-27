@@ -1,0 +1,66 @@
+{
+  "server": {
+    "name": "mcp-conduit",
+    "protocolVersion": "2024-11-05"
+  },
+  "policy": {
+    "trackBinaryPaths": false,
+    "requireTestCommand": false
+  },
+  "runner": {
+    "timeoutSeconds": 120,
+    "retry": {
+      "maxAttempts": 2,
+      "delaySeconds": 2
+    }
+  },
+  "providersDir": ".mcp-conduit/providers",
+  "providers": {
+    "codex": {
+      "type": "json-cli",
+      "binary": "codex",
+      "inputMode": "arg",
+      "inputFlag": "",
+      "args": ["exec"],
+      "model": "gpt-5.2-low",
+      "healthCheck": {
+        "versionArgs": ["--version"],
+        "authArgs": ["login", "status"]
+      }
+    },
+    "gemini": {
+      "type": "json-cli",
+      "binary": "gemini",
+      "inputMode": "arg",
+      "inputFlag": "--prompt",
+      "args": ["--output-format", "json"],
+      "model": "gemini-1.5-pro",
+      "healthCheck": {
+        "versionArgs": ["--version"],
+        "authArgs": ["--prompt", "ping", "--output-format", "json"],
+        "authOutputMode": "json"
+      }
+    },
+    "claude": {
+      "type": "json-cli",
+      "binary": "claude",
+      "inputMode": "arg",
+      "inputFlag": "-p",
+      "args": ["--output-format", "json"],
+      "model": "sonnet",
+      "healthCheck": {
+        "versionArgs": ["--version"],
+        "authArgs": ["--output-format", "json", "-p", "ping"],
+        "authOutputMode": "json"
+      }
+    }
+  },
+  "audit": {
+    "enabled": true,
+    "dir": ".mcp-conduit/audit"
+  },
+  "logs": {
+    "enabled": true,
+    "dir": ".mcp-conduit/logs"
+  }
+}

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .mcp-conduit/
+TODO.md
 
 mcp-conduit.config.json
 
