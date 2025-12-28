@@ -19,7 +19,7 @@ const DEFAULT_CONFIG: Config = {
   server: {
     name: "mcp-conduit",
     version: getPackageVersion(),
-    protocolVersion: "2024-11-05"
+    protocolVersion: "2025-11-25"
   },
   policy: {
     trackBinaryPaths: false,
