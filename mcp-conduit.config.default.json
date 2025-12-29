@@ -21,8 +21,8 @@
       "binary": "codex",
       "inputMode": "arg",
       "inputFlag": "",
-      "args": ["exec"],
-      "model": "gpt-5.2-low",
+      "args": ["exec", "--model", "gpt-5.2-codex", "-c", "model_reasoning_effort=\"low\"", "--skip-git-repo-check","--full-auto"],
+      "model": "",
       "healthCheck": {
         "versionArgs": ["--version"],
         "authArgs": ["login", "status"]
@@ -33,8 +33,8 @@
       "binary": "gemini",
       "inputMode": "arg",
       "inputFlag": "--prompt",
-      "args": ["--output-format", "json"],
-      "model": "gemini-1.5-pro",
+      "model": "gemini-2.5-flash-lite",
+      "args": ["--output-format", "json", "--yolo"],
       "healthCheck": {
         "versionArgs": ["--version"],
         "authArgs": ["--prompt", "ping", "--output-format", "json"],
@@ -46,7 +46,7 @@
       "binary": "claude",
       "inputMode": "arg",
       "inputFlag": "-p",
-      "args": ["--output-format", "json"],
+      "args": ["--output-format", "json", "--dangerously-skip-permissions"],
       "model": "sonnet",
       "healthCheck": {
         "versionArgs": ["--version"],
