@@ -113,7 +113,27 @@ function resolveConfigPath(configPath?: string): { resolvedPath: string; explici
   if (envPath && envPath.trim().length > 0) {
     return { resolvedPath: path.resolve(envPath), explicit: true };
   }
-  return { resolvedPath: path.resolve(process.cwd(), "mcp-conduit.config.json"), explicit: false };
+
+  // Fallback 1: CWD
+  const cwdPath = path.resolve(process.cwd(), "mcp-conduit.config.json");
+  if (fs.existsSync(cwdPath)) {
+    return { resolvedPath: cwdPath, explicit: false };
+  }
+
+  // Fallback 2: Project Root (relative to compiled dist/core/config.js)
+  try {
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    // dist/core -> dist -> root
+    const projectRoot = path.resolve(currentDir, "..", "..");
+    const projectPath = path.resolve(projectRoot, "mcp-conduit.config.json");
+    if (fs.existsSync(projectPath)) {
+      return { resolvedPath: projectPath, explicit: false };
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return { resolvedPath: cwdPath, explicit: false };
 }
 
 function mergeConfig(base: Config, overrides: Partial<Config>): Config {

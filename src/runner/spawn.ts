@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
 import fs from "node:fs";
 import { Invocation } from "../providers/base.js";
 import { RunnerResult } from "../core/types.js";
@@ -78,13 +78,13 @@ export function runCommand(cmd: string, args: string[], options: CommandOptions)
 
     startIdleTimer();
 
-    child.stdout.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
       writeLog("stdout", chunk);
       resetIdleTimer();
     });
 
-    child.stderr.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
       writeLog("stderr", chunk);
       resetIdleTimer();
@@ -109,7 +109,7 @@ export function runCommand(cmd: string, args: string[], options: CommandOptions)
       });
     });
 
-    if (options.input) {
+    if (options.input && child.stdin) {
       child.stdin.write(options.input);
       child.stdin.end();
     }

@@ -15,7 +15,7 @@ import {
 } from "./core/types.js";
 import { renderPrompt } from "./context/bundle.js";
 import { postCheck, preCheck } from "./policy/engine.js";
-import { checkProviderHealth, ProviderHealthStatus } from "./providers/health.js";
+import { checkProviderHealth, checkProvidersHealth, ProviderHealthStatus } from "./providers/health.js";
 import { resolveProvider } from "./providers/index.js";
 import { runInvocation, runShellCommand } from "./runner/spawn.js";
 import { makeTaskId } from "./utils/ids.js";
@@ -54,8 +54,21 @@ const server = new Server(
 );
 const providerStatusCache = new Map<string, CachedProviderStatus>();
 
+// Initialize cache with unknown state for all configured providers
+function initializeProviderStatuses(config: Config) {
+  for (const id of Object.keys(config.providers)) {
+    cacheProviderStatus(id, { id, ok: true, reason: "checking..." }, "health");
+  }
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const providerStatuses = await getProviderStatuses(config);
+  // Return immediately with cached statuses
+  const providerStatuses = getCachedProviderStatuses(config);
+
+  // Trigger a refresh in background if we haven't checked recently (optional, 
+  // but for now relying on the initial verify + periodic background checks could be better.
+  // simpler: just return what we have. The user can force refresh with providers_health).
+
   return {
     tools: [
       runTaskToolDefinition(providerStatuses),
@@ -64,38 +77,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
   const toolName = request.params.name;
   const args = request.params.arguments;
 
   if (toolName === "run_task") {
     const argsValidation = validateTaskRequest(args);
     if (!argsValidation.ok) {
-        throw new McpError(ErrorCode.InvalidParams, `Invalid tool arguments: ${argsValidation.errors.join(", ")}`);
+      throw new McpError(ErrorCode.InvalidParams, `Invalid tool arguments: ${argsValidation.errors.join(", ")}`);
     }
     const result = await runTask(argsValidation.value, config);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
   }
 
   if (toolName === "providers_health") {
     const argsValidation = validateProviderHealthRequest(args);
     if (!argsValidation.ok) {
-        throw new McpError(ErrorCode.InvalidParams, `Invalid tool arguments: ${argsValidation.errors.join(", ")}`);
+      throw new McpError(ErrorCode.InvalidParams, `Invalid tool arguments: ${argsValidation.errors.join(", ")}`);
     }
     const result = await runProvidersHealth(argsValidation.value, config);
     return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
   }
 
   throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
 });
 
+// --- Helper Functions (Preserved logic) ---
+
 async function main() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+  const transport = new StdioServerTransport();
+
+  try {
+    initializeProviderStatuses(config);
+
+    // Start background health check (does not block startup)
+    verifyAllProviders(config).catch(err => {
+      console.error(`Background health check error: ${err}`);
+    });
+  } catch (e) {
+    console.error(`Server startup initialization error: ${e}`);
+  }
+
+  await server.connect(transport);
 }
 
 main().catch((error) => {
@@ -103,7 +130,12 @@ main().catch((error) => {
   process.exit(1);
 });
 
-// --- Helper Functions (Preserved logic) ---
+async function verifyAllProviders(config: Config) {
+  const statuses = await checkProvidersHealth(config);
+  for (const status of statuses) {
+    cacheProviderStatus(status.id, status, "health");
+  }
+}
 
 function runTaskToolDefinition(providerStatuses?: ProviderHealthStatus[]) {
   const summary = summarizeProviderStatuses(providerStatuses ?? []);
@@ -113,7 +145,7 @@ function runTaskToolDefinition(providerStatuses?: ProviderHealthStatus[]) {
   }
 
   const descriptionParts = [
-    "Run a delegated task using a local LLM CLI with policy enforcement."
+    "Run a delegated task using a local LLM CLI (provider) with policy enforcement."
   ];
   descriptionParts.push("Use providers_health to refresh cached availability.");
   if (summary.available.length > 0) {
@@ -229,7 +261,7 @@ async function runTask(task: TaskRequest, config: Config): Promise<ExecutionResu
   const effectiveCwd = task.cwd ?? providerConfig?.cwd ?? process.cwd();
   const taskForExecution = { ...task, cwd: effectiveCwd };
   const prompt = renderPrompt(taskForExecution, config);
-  
+
   if (!task.dryRun && providerConfig) {
     const cached = getCachedProviderStatus(task.provider);
     if (cached && !cached.ok) {
@@ -305,14 +337,14 @@ async function runTask(task: TaskRequest, config: Config): Promise<ExecutionResu
   const logDir = path.resolve(effectiveCwd, config.logs.dir);
   const executionLog = shouldWriteLogs(config, task)
     ? prepareExecutionLog(
-        taskId,
-        task.provider,
-        effectiveCwd,
-        logDir,
-        timeoutSeconds,
-        retryPolicy.maxAttempts,
-        startedAt
-      )
+      taskId,
+      task.provider,
+      effectiveCwd,
+      logDir,
+      timeoutSeconds,
+      retryPolicy.maxAttempts,
+      startedAt
+    )
     : undefined;
   if (executionLog) {
     result.executionLog = executionLog;
@@ -634,9 +666,16 @@ function shouldWriteLogs(config: Config, task: TaskRequest): boolean {
 // Provider/Health Helpers
 
 async function getProviderStatuses(config: Config): Promise<ProviderHealthStatus[]> {
-  const entries = Object.entries(config.providers);
-  const checks = entries.map(([id, providerConfig]) => getProviderStatus(id, providerConfig));
-  return Promise.all(checks);
+  // Now simply returns cached values to be non-blocking
+  return getCachedProviderStatuses(config);
+}
+
+function getCachedProviderStatuses(config: Config): ProviderHealthStatus[] {
+  const entries = Object.keys(config.providers);
+  return entries.map(id => {
+    const cached = getCachedProviderStatus(id);
+    return cached ?? { id, ok: false, reason: "unknown" };
+  });
 }
 
 async function getProviderStatus(id: string, providerConfig: ProviderConfig): Promise<ProviderHealthStatus> {
@@ -713,28 +752,28 @@ function formatProviderHealthError(
 }
 
 function classifyRunnerFailure(
-    runner: RunnerResult,
-    config: ProviderConfig,
-    provider: string,
-    timeoutSeconds: number
+  runner: RunnerResult,
+  config: ProviderConfig,
+  provider: string,
+  timeoutSeconds: number
 ): RunnerFailure | undefined {
-    if (runner.timedOut) {
-        return {
-            message: `Task timed out after ${timeoutSeconds}s`,
-            logMessage: `Alert: Task timed out after ${timeoutSeconds}s`,
-            retryable: true,
-            category: "timeout"
-        };
-    }
-    if (runner.exitCode !== 0) {
-        return {
-            message: `Command failed with exit code ${runner.exitCode}`,
-            logMessage: `Alert: Command failed with exit code ${runner.exitCode}`,
-            retryable: false,
-            category: "exit"
-        };
-    }
-    return undefined; // Success
+  if (runner.timedOut) {
+    return {
+      message: `Task timed out after ${timeoutSeconds}s`,
+      logMessage: `Alert: Task timed out after ${timeoutSeconds}s`,
+      retryable: true,
+      category: "timeout"
+    };
+  }
+  if (runner.exitCode !== 0) {
+    return {
+      message: `Command failed with exit code ${runner.exitCode}`,
+      logMessage: `Alert: Command failed with exit code ${runner.exitCode}`,
+      retryable: false,
+      category: "exit"
+    };
+  }
+  return undefined; // Success
 }
 
 function prepareExecutionLog(
